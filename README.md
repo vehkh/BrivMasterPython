@@ -49,7 +49,7 @@ blank restarts, and the run Monitor. Not ported: the AHK theme colour table
 ## Setup
 
 ```powershell
-git clone <this repo>
+git clone https://github.com/vehkh/BrivMasterPython.git
 cd BrivMasterPython
 python setup_check.py     # or double-click setup.bat
 ```
