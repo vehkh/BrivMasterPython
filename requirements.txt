@@ -1,0 +1,3 @@
+# Farm + tools (probe, run_farm, relay): standard library only.
+# Home GUI and Monitor:
+PySide6>=6.6
