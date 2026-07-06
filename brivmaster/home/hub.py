@@ -159,8 +159,26 @@ class HomeHub:
             return  # already running
         args = [sys.executable, "-m", "brivmaster.run_farm",
                 "--settings", self.settings_path]
-        self.farm_process = subprocess.Popen(args, close_fds=True)
-        self.status_message = "Starting Gem Farm..."
+        try:
+            self.farm_process = subprocess.Popen(
+                args,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True
+            )
+            self.status_message = f"Farm starting (PID: {self.farm_process.pid})..."
+
+            # Check if process exited immediately (error condition)
+            import time
+            time.sleep(0.5)
+            ret_code = self.farm_process.poll()
+            if ret_code is not None:
+                # Process exited - capture error
+                stdout, stderr = self.farm_process.communicate()
+                error_msg = (stderr or stdout or "Unknown error").strip()
+                self.status_message = f"Farm failed: {error_msg[:150]}"
+        except Exception as err:
+            self.status_message = f"Error starting farm: {err}"
         # The GUI retries Connect on its timer until the endpoint appears
 
     def Stop_Clicked(self):
