@@ -247,13 +247,20 @@ class DialogSwatter:
         self._stop.set()
 
     def _run(self):
-        while not self._stop.is_set() and tick_ms() <= self._deadline:
+        while not self._stop.is_set():
+            active = False
             try:
                 if self._ctx.memory.ReadWelcomeBackActive():
+                    active = True
                     with self._ctx.critical:
                         self._key_esc.key_press()
             except Exception:  # noqa: BLE001 - reads race game restarts
                 pass
+            # As in the AHK: the 3s deadline only stops the timer while the
+            # dialog is NOT showing - keep swatting an active dialog (slow
+            # Wine loads can show it later/longer than 3s)
+            if not active and tick_ms() > self._deadline:
+                break
             time.sleep(0.1)
 
 
