@@ -39,6 +39,45 @@ accuracy. Open the Home GUI, check the Game Settings profile, close the
 game, and click **Set Now** once. (Profile: 600fps, particles 0, all hero
 boxes shown, no background FPS cap.)
 
+## Linux: using the PC while the farm runs (isolated display)
+
+On Windows the script posts key messages directly to the game window, so
+you can keep using the PC. On Linux, Wine ignores synthetic X11 events,
+so keys go through XTEST **to the focused window** - the farm has to keep
+re-focusing the game, stealing your keyboard several times a second.
+
+**Workaround: run the game on a nested X display (Xephyr).** The farm's
+input and focus churn then happen inside that display; your desktop is
+untouched. You still see the game inside the Xephyr window.
+
+```bash
+# 1. Install Xephyr (Fedora/Nobara)
+sudo dnf install xorg-x11-server-Xephyr
+#    (Debian/Ubuntu: sudo apt install xserver-xephyr)
+
+# 2. Start a nested display (any free number; keep it running)
+Xephyr :2 -screen 1920x1080 &
+
+# 3. Start everything with BRIVMASTER_DISPLAY set:
+BRIVMASTER_DISPLAY=:2 python3 -m brivmaster.home       # GUI stays on your
+                                                        # desktop; Launch
+                                                        # Game + the farm
+                                                        # use :2
+# or without the GUI:
+BRIVMASTER_DISPLAY=:2 python3 -m brivmaster.run_farm
+```
+
+Notes:
+- The game must be **launched with the variable set** (use the Home GUI's
+  Launch Game button or let the farm start it) so its window opens on :2.
+  A game already running on your desktop stays on your desktop.
+- Memory reads, the Home GUI, logs and IPC are unaffected - only window
+  finding, focus and key injection move to the nested display.
+- Don't click inside the Xephyr window while farming - that hands it your
+  keyboard until you click back outside.
+- Without Xephyr the farm still works; you just can't use the keyboard
+  elsewhere while it runs (same as watching the AHK farm work).
+
 ## Mac Settings
 ```json
 {

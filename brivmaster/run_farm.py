@@ -14,6 +14,14 @@ import argparse
 import os
 import sys
 
+# Linux only: run the farm (and the game it launches) against a separate
+# X display, e.g. a nested Xephyr server. XTEST key injection types into
+# the focused window of ITS display, so with the game isolated on :2 the
+# user's desktop keeps its focus. Must happen before pynput/Xlib import
+# (they bind to $DISPLAY at import time), hence before the farm imports.
+if os.environ.get("BRIVMASTER_DISPLAY"):
+    os.environ["DISPLAY"] = os.environ["BRIVMASTER_DISPLAY"]
+
 from .farm.ctx import FarmContext
 from .farm.gem_farm import GemFarm, PreFlightError
 from .farm.heroes import Heroes

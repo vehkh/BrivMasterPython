@@ -275,8 +275,14 @@ class HomeHub:
         return snapshot
 
     def IsGameOpen(self):
-        return bool(self._win.find_window_by_exe(
-            self.ctx.setting("IBM_Game_Exe", "IdleDragons.exe")))
+        exe = self.ctx.setting("IBM_Game_Exe", "IdleDragons.exe")
+        if self._win.find_window_by_exe(exe):
+            return True
+        # Isolated-display mode (BRIVMASTER_DISPLAY): the game window lives
+        # on another X display the Home GUI cannot see - check the process
+        if os.environ.get("BRIVMASTER_DISPLAY"):
+            return bool(self._win.find_pids(exe))
+        return False
 
     def RefreshChestCounts(self):
         memory = self.ctx.memory

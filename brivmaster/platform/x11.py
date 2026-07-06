@@ -188,6 +188,10 @@ def launch(command, hide=False):
     if legendary:
         try:
             env = os.environ.copy()
+            # Isolated-display mode: the game must open on the same display
+            # the farm injects into (see BRIVMASTER_DISPLAY in run_farm.py)
+            if env.get("BRIVMASTER_DISPLAY"):
+                env["DISPLAY"] = env["BRIVMASTER_DISPLAY"]
             config = os.path.expanduser(
                 "~/.config/heroic/legendaryConfig/legendary")
             if os.path.isdir(config):
@@ -388,6 +392,15 @@ def control_focus(hwnd):
         attrs = hwnd.get_attributes()
         if attrs.map_state != X.IsViewable:
             return False
+        # Skip the focus request when the window already has it: the farm
+        # calls this before every key batch, and redundant set_input_focus
+        # requests add churn/flicker on the desktop.
+        try:
+            current = _get_display().get_input_focus().focus
+            if getattr(current, "id", None) == hwnd.id:
+                return True
+        except Exception:
+            pass
         hwnd.set_input_focus(X.RevertToPointerRoot, 0)  # timestamp=0 (current)
         _get_display().sync()
         return True
