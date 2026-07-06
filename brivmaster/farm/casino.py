@@ -86,6 +86,10 @@ class EllywickCasino:
             num_gem_cards = elly.GetNumGemCards()
             if num_cards is None:
                 break  # abort - memory reads unavailable
+            if num_gem_cards is None:
+                # AHK compares "" < n as true; a failed gem-card read must
+                # not crash the Casino - treat as no gem cards yet
+                num_gem_cards = 0
             if num_cards < self.MinCards or num_gem_cards < self.GemCardsNeeded:
                 if self.MaxRedraws - self.Redraws > 0:
                     if not self.UsedUlt and self.ShouldRedraw(num_cards,
