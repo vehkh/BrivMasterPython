@@ -8,16 +8,16 @@ derived from addons by ImpEGamer and Emmote. Full credit to those authors:
 this port re-implements their design 1:1 (ported classes even keep the AHK
 method names for side-by-side comparability).
 
-**Why a port?** AutoHotkey has no Linux equivalent. Python does. The
-Windows version is complete and validated; **Linux support is the next
-phase** (see below).
+**Why a port?** AutoHotkey has no Linux equivalent. Python does. Both
+Windows and Linux versions are now complete and validated.
 
 ## Status
 
 | Platform | State |
 |---|---|
 | **Windows** | Working - all test stages passed. Validated on a real end-game farm including a **73-hour / 5,582-run unattended soak at -2% BPH vs the AHK original** (20.5k BPH), with 0 fails on healthy servers: Ellywick Casino with re-rolls, combined Thellora+Briv start, feat-swap jump routing, online stacking (exact stack targets), offline/blank/relay restarts, Steelbones-to-Haste conversion saves, chest buying/daily platinum, game-settings profiles, and automatic crash recovery (~50s back to farming after a killed game). Full results in `TESTING.md`. |
-| **Linux** | **Next phase - not yet functional.** The memory layer is written for Linux (the game under Wine/Proton is the same Windows binary, so the offsets system carries over) but unvalidated, and the X11 input/window backend does not exist yet. See "Linux roadmap" below. |
+| **Linux** | **Working** - Full X11 backend (window management, key injection), Heroic legendary launcher integration, cross-platform auto-detection, universal setup script. Memory reading via `process_vm_readv` and `/proc/<pid>/mem`. All test stages passed. Requires `kernel.yama.ptrace_scope=0` for memory access. Run with `python setup_and_run.py`. |
+| **Mac** | **Supported** - X11 backend with same architecture as Linux. Untested (no hardware available) but should work. Requires `python-xlib` and Wine/Proton. |
 
 What's included: the gem farm itself, the Home GUI (PySide6 - live status,
 run control, all settings editors incl. a clickable route grid with
@@ -29,7 +29,7 @@ blank restarts, and the run Monitor. Not ported: the AHK theme colour table
 
 ## Requirements
 
-- **Windows 10/11** (Linux: next phase)
+- **Windows 10/11, Linux, or Mac** with Wine/Proton (Heroic recommended)
 - **Python 3.10+, 64-bit** (64-bit is mandatory - the game is 64-bit;
   developed/tested on 3.12) - [python.org](https://www.python.org/downloads/)
 - **PySide6** (installed automatically by the setup script; only needed for
@@ -48,11 +48,27 @@ blank restarts, and the run Monitor. Not ported: the AHK theme colour table
 
 ## Setup
 
-```powershell
+**New users (all platforms - Windows, Linux, Mac):**
+
+```bash
 git clone https://github.com/vehkh/BrivMasterPython.git
 cd BrivMasterPython
-python setup_check.py     # or double-click setup.bat
+python setup_and_run.py    # Universal setup (auto-detects platform)
 ```
+
+**Or manual setup:**
+
+```bash
+python setup_check.py      # Windows: double-click setup.bat
+```
+
+`setup_and_run.py` is a universal cross-platform setup script that:
+- Auto-detects your OS (Windows/Linux/Mac)
+- Installs dependencies (python-xlib, pynput)
+- Sets up permissions (Linux ptrace)
+- Validates Heroic/game installation
+- Finds and configures game paths
+- Launches the game and starts farming
 
 `setup_check.py` verifies your Python (version/bitness), installs missing
 libraries, imports every module, and tells you if the offsets/settings
@@ -65,17 +81,19 @@ configure, and Save Settings.
 
 ## Running
 
-```powershell
+**All platforms (Windows, Linux, Mac):**
+
+```bash
 python -m brivmaster.home       # Home GUI (start/stop/monitor the farm, all settings)
 python -m brivmaster.run_farm   # the farm itself (Home's Start button spawns this)
 python -m brivmaster.monitor    # run monitor (reads MiniLog.json)
-python tools\probe.py --wait 60 # read-only memory probe - validate offsets/attach
+python -m brivmaster.run_farm --dry-run  # validate config without sending input
+python tools/probe.py --wait 60 # read-only memory probe - validate offsets/attach
 ```
 
-Or use the shorter launcher (double-click `run.bat` for the Home GUI, or
-pass a command). These are exactly equivalent to the `-m` commands above:
+Or use the shorter launcher (cross-platform):
 
-```powershell
+```bash
 python run.py home              # Home GUI
 python run.py farm              # gem farm  (add --dry-run to test without input)
 python run.py monitor           # run monitor
@@ -83,29 +101,44 @@ python run.py probe --wait 60   # memory probe
 python run.py setup             # environment check / install dependencies
 ```
 
-`TESTING.md` contains a staged validation plan (passive probes -> input
-check -> supervised first run) - recommended before unattended use.
-`PORTING.md` documents the architecture and every deliberate deviation from
-the AHK original.
+**Windows only (optional - shortcuts):**
+- Double-click `run.bat` for the Home GUI
+- Or use PowerShell: `python run.py home`
+
+## Documentation
+
+- **`START_HERE.md`** - Quick navigation for new users
+- **`QUICKSTART.md`** - Quick start guide (all platforms)
+- **`HOW_TO_RUN.md`** - Detailed running instructions
+- **`CROSS_PLATFORM.md`** - Cross-platform implementation details
+- **`SETTINGS_BY_PLATFORM.md`** - Platform-specific configuration
+- **`TESTING.md`** - Staged validation plan (passive probes -> input check -> supervised first run) - recommended before unattended use
+- **`PORTING.md`** - Architecture overview and deliberate deviations from the AHK original
+- **`setup_and_run.py`** - Universal setup script for all platforms
 
 **Never run this and the AHK BrivMaster farm at the same time.**
 
-## Linux roadmap (next phase)
+## Linux & Mac Support
 
-The whole point of this port. Idle Champions has no native Linux build; it
-runs under Wine/Proton (via Heroic/Lutris - not a container, just a
-translation layer), which means the game is the same Windows binary and the
-entire offsets/memory system here already targets it:
+Idle Champions has no native Linux or Mac builds; it runs under Wine/Proton 
+(via Heroic/Lutris - not a container, just a translation layer). The game is 
+the same Windows binary on all platforms, so the entire offsets/memory system 
+targets it uniformly.
 
-- **Done, unvalidated:** Linux memory backend (`process_vm_readv` +
-  `/proc/<pid>/maps`), process discovery for Wine processes,
-  SIGSTOP/SIGCONT relay hold. Requires `kernel.yama.ptrace_scope=0` or
-  `CAP_SYS_PTRACE`.
-- **To do:** X11 input backend (XSendEvent to the Wine window, XTEST
-  fallback) and window management (find/activate/close via EWMH); launch
-  integration for Heroic/Lutris.
-- Recommended runtime will be **Heroic with Wine/Proton-GE** (plain wine
-  process, no Steam pressure-vessel container in the way).
+**Linux implementation (complete and tested):**
+- ✅ Memory backend: `process_vm_readv` + `/proc/<pid>/mem` for reading game state
+- ✅ X11 input backend: pynput for key injection to Wine windows
+- ✅ Window management: EWMH protocol for window discovery/activation/close
+- ✅ Process management: find Wine processes, handle lifecycle
+- ✅ Heroic launcher: legendary CLI integration with EGS authentication
+- ✅ Universal setup script: auto-detects and configures everything
+- ✅ Cross-platform auto-detection: selects correct backend per platform
+- ✅ Ptrace permission: setup script configures `kernel.yama.ptrace_scope=0`
+
+**Recommended setup:**
+- **Linux:** Heroic with Wine/Proton-GE (or native Proton/Wine)
+- **Mac:** Heroic with Wine/Proton-GE
+- Run `python setup_and_run.py` to auto-configure everything
 
 ## Disclaimer
 
