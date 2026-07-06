@@ -72,6 +72,17 @@ python -m brivmaster.monitor    # run monitor (reads MiniLog.json)
 python tools\probe.py --wait 60 # read-only memory probe - validate offsets/attach
 ```
 
+Or use the shorter launcher (double-click `run.bat` for the Home GUI, or
+pass a command). These are exactly equivalent to the `-m` commands above:
+
+```powershell
+python run.py home              # Home GUI
+python run.py farm              # gem farm  (add --dry-run to test without input)
+python run.py monitor           # run monitor
+python run.py probe --wait 60   # memory probe
+python run.py setup             # environment check / install dependencies
+```
+
 `TESTING.md` contains a staged validation plan (passive probes -> input
 check -> supervised first run) - recommended before unattended use.
 `PORTING.md` documents the architecture and every deliberate deviation from
