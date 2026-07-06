@@ -507,8 +507,30 @@ class HomeWindow(QMainWindow):
     def _load_levels_table(self):
         levels = self.hub.ctx.settings.get("IBM_LevelManager_Levels", {}) or {}
         self.levels_table.setRowCount(0)
-        for hero_id, data in sorted(levels.items(), key=lambda p: int(p[0])):
+        for hero_id, data in self._levels_sorted(levels):
             self._levels_append_row(hero_id, data)
+
+    def _levels_sorted(self, levels):
+        """Rows ordered by seat then hero ID, as the AHK GUI lists them;
+        falls back to plain ID order when the game is not readable."""
+        def sort_key(pair):
+            hero_id = int(pair[0])
+            seat = self._hero_seat(hero_id)
+            return (seat if seat else 99, hero_id)
+        return sorted(levels.items(), key=sort_key)
+
+    def _hero_seat(self, hero_id):
+        """Champion seat from game memory; None when not readable."""
+        try:
+            memory = self.hub.ctx.memory
+            if not memory.IsAttached:
+                exe = self.hub.ctx.setting("IBM_Game_Exe", "IdleDragons.exe")
+                if memory.AttachToReadyInstance(exe, wait_s=0) is None:
+                    return None
+            hero = self.hub.ctx.heroes[int(hero_id)]
+            return hero.ReadChampSeat() if hero else None
+        except Exception:  # noqa: BLE001 - ordering is cosmetic
+            return None
 
     def _hero_name(self, hero_id):
         """Champion name from game memory (as the AHK GUI's ReadName);
@@ -576,8 +598,7 @@ class HomeWindow(QMainWindow):
         if memory.AttachToReadyInstance(exe, wait_s=0) is None:
             self.status_label.setText("Refresh Formations: game not readable")
             return
-        present = {str(self.levels_table.item(row, 0).text())
-                   for row in range(self.levels_table.rowCount())}
+        merged = self._levels_collect()  # keep unsaved edits + Feat data
         added = 0
         slots = [memory.GetSavedFormationSlotByFavorite(1),
                  memory.GetSavedFormationSlotByFavorite(2),
@@ -587,22 +608,14 @@ class HomeWindow(QMainWindow):
             if slot is None or slot < 0:
                 continue
             for champ in (memory.GetFormationSaveBySlot(slot, True) or []):
-                if champ and str(champ) not in present:
-                    present.add(str(champ))
-                    self._levels_append_row(str(champ),
-                                            {"z1": 0, "prio": 0,
-                                             "priolimit": "", "min": 0})
+                if champ and str(champ) not in merged:
+                    merged[str(champ)] = {"z1": 0, "prio": 0,
+                                          "priolimit": "", "min": 0}
                     added += 1
-        # Fill in names that were blank (e.g. GUI opened before the game)
-        for row in range(self.levels_table.rowCount()):
-            name_item = self.levels_table.item(row, 1)
-            id_item = self.levels_table.item(row, 0)
-            if id_item and (name_item is None or not name_item.text()):
-                name = self._hero_name(id_item.text())
-                if name:
-                    item = QTableWidgetItem(name)
-                    item.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable)
-                    self.levels_table.setItem(row, 1, item)
+        # Rebuild seat-ordered; also (re)fills names now the game is readable
+        self.levels_table.setRowCount(0)
+        for hero_id, data in self._levels_sorted(merged):
+            self._levels_append_row(hero_id, data)
         self.status_label.setText(f"Refresh Formations: added {added} champion(s)")
 
     def _levels_add_row(self):
