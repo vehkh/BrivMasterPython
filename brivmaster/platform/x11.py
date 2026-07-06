@@ -316,16 +316,23 @@ def find_window_by_pid(pid):
 
 def find_windows_by_exe(exe_name):
     """All visible windows whose process name matches the exe name.
+    Viewable (mapped) windows are listed first so callers focusing/typing
+    get the live window, not a dying one from before a game restart.
     Returns [(window, pid), ...]."""
     pids = {int(p) for p in find_pids(exe_name)}
     if not pids:
         return []
-    result = []
+    viewable, other = [], []
     for window in _candidate_windows():
         pid = window_pid(window)
-        if pid in pids and _is_visible(window):
-            result.append((window, pid))
-    return result
+        if pid not in pids:
+            continue
+        try:
+            mapped = window.get_attributes().map_state == X.IsViewable
+        except Exception:
+            continue
+        (viewable if mapped else other).append((window, pid))
+    return viewable + other
 
 
 def find_window_by_exe(exe_name):
@@ -372,9 +379,15 @@ def activate_window(hwnd):
 
 def control_focus(hwnd):
     """Give a window keyboard focus (without necessarily raising it)."""
-    if not hwnd or not window_exists(hwnd):
+    if not hwnd:
         return False
     try:
+        # Focusing an unmapped/destroyed window raises async BadMatch
+        # errors (flooding stderr) and does nothing - check map_state first
+        # (stale hwnds are common right after the farm restarts the game).
+        attrs = hwnd.get_attributes()
+        if attrs.map_state != X.IsViewable:
+            return False
         hwnd.set_input_focus(X.RevertToPointerRoot, 0)  # timestamp=0 (current)
         _get_display().sync()
         return True

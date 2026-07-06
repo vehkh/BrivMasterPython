@@ -16,11 +16,28 @@ When copying `IC_BrivMaster_Settings.json` from Windows to another platform, you
 {
   "IBM_Game_Exe": "IdleDragons.exe",
   "IBM_Game_Launch": "/usr/lib64/heroic/resources/app.asar.unpacked/build/bin/x64/linux/legendary",
-  "IBM_Game_Hide_Launcher": 0
+  "IBM_Game_Hide_Launcher": 0,
+  "IBM_Level_Options_Mod_Key": "Shift",
+  "IBM_Level_Options_Mod_Value": 10
 }
 ```
 
 **Note:** The launch command is auto-handled by the farm's X11 backend with proper app ID and Wine configuration.
+
+**IMPORTANT - levelling modifier on Linux:** the game under Wine does not
+see a virtual **Ctrl** key at all (a Wine raw-input quirk), so the default
+Ctrl/x25 fine-levelling silently degrades to x100 presses and overshoots
+your level caps past specialisation choices. **Shift/x10 works reliably** -
+set `IBM_Level_Options_Mod_Key` to `"Shift"` and `IBM_Level_Options_Mod_Value`
+to `10` as above. Targets that are not multiples of 10 stop just under the
+cap (safe direction).
+
+**IMPORTANT - apply your game-settings profile:** a fresh Heroic install
+runs the game at 60fps / 720p / full particles / hero boxes hidden, which
+makes key presses take over a second to register and breaks levelling
+accuracy. Open the Home GUI, check the Game Settings profile, close the
+game, and click **Set Now** once. (Profile: 600fps, particles 0, all hero
+boxes shown, no background FPS cap.)
 
 ## Mac Settings
 ```json
