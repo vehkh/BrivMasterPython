@@ -24,8 +24,16 @@ def platform_name(platform_id):
 
 
 def resolve_platform(memory, override=None):
-    """Platform from the game, or the override; 18 is treated as 11."""
+    """Platform from the override, the game, or the offsets file metadata;
+    18 is treated as 11."""
     platform_id = override or memory.ReadPlatform()
+    if not platform_id:
+        # The in-game platform pointer is not always readable (e.g. right
+        # after a restart); the offsets file records what it was built for.
+        try:
+            platform_id = int(memory.Versions.get("Platform") or 0) or None
+        except (AttributeError, TypeError, ValueError):
+            platform_id = None
     if platform_id == 18:
         platform_id = 11
     return platform_id
@@ -48,6 +56,10 @@ def fetch_header(settings, platform_id):
 
 def check_versions(memory, settings, platform_override=None):
     """CheckOffsetVersions port - returns a dict for display."""
+    if not memory.IsAttached:
+        # Attach on demand so the check works without a running farm
+        exe = settings.get("IBM_Game_Exe", "IdleDragons.exe")
+        memory.AttachToReadyInstance(exe, wait_s=0)
     result = {
         "game": None, "platform": None,
         "current_imports": memory.GetImportsVersion(),

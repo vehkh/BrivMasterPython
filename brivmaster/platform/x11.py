@@ -148,59 +148,72 @@ def set_priority_realtime(pid):
     return True
 
 
+# Idle Champions' EGS app ID (constant across all installs)
+_IC_EGS_APP_ID = "40cb42e38c0b4a14a1bb133eb3291572"
+
+# Heroic's bundled legendary binary, in install-method order
+_LEGENDARY_CANDIDATES = (
+    "/usr/lib64/heroic/resources/app.asar.unpacked/build/bin/x64/linux/legendary",
+    "/usr/lib/heroic/resources/app.asar.unpacked/build/bin/x64/linux/legendary",
+    "/opt/Heroic/resources/app.asar.unpacked/build/bin/x64/linux/legendary",
+    os.path.expanduser("~/.var/app/com.heroicgameslauncher.hgl/config"
+                       "/heroic/tools/legendary/legendary"),
+)
+
+
+def _find_legendary(command):
+    """Locate a legendary binary: the configured command if it is one,
+    otherwise the first existing Heroic-bundled candidate."""
+    first_word = command.split(" ", 1)[0] if command else ""
+    if os.path.basename(first_word).startswith("legendary") \
+            and os.path.exists(first_word):
+        return first_word
+    for candidate in _LEGENDARY_CANDIDATES:
+        if os.path.exists(candidate):
+            return candidate
+    return None
+
+
 def launch(command, hide=False):
     """Port of the AHK Run command for game launch on Linux.
 
-    On Linux with Heroic/Legendary, uses Heroic's legendary binary with proper
-    authentication and environment setup. Falls back to direct Wine launch or
-    shell commands.
+    Prefers Heroic's legendary CLI (handles EGS authentication); falls back
+    to running the configured command directly.
 
     Returns PID if we have it, or 0 if discovery by scanning is needed.
     """
-    command = command.strip()
+    command = (command or "").strip()
 
-    # Try Heroic's legendary launcher first (most reliable with authentication)
-    legendary_binary = "/usr/lib64/heroic/resources/app.asar.unpacked/build/bin/x64/linux/legendary"
-    if os.path.exists(legendary_binary):
-        # For Heroic installs, use legendary with EGS app ID
-        # Common pattern: /path/to/legendary launch <APP_ID>
+    legendary = _find_legendary(command)
+    if legendary:
         try:
-            # Extract app ID if it looks like a legendary command
-            if "launch" in command or "Idle Champions" in command:
-                env = os.environ.copy()
-                env["LEGENDARY_CONFIG_PATH"] = os.path.expanduser(
-                    "~/.config/heroic/legendaryConfig/legendary")
-
-                # Use legendary to launch the game with proper authentication
-                process = subprocess.Popen(
-                    [legendary_binary, "launch", "40cb42e38c0b4a14a1bb133eb3291572",
-                     "--wine", "/usr/bin/wine", "--language", "en"],
-                    env=env, close_fds=True,
-                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                return 0  # Let the PID scanner find it
+            env = os.environ.copy()
+            config = os.path.expanduser(
+                "~/.config/heroic/legendaryConfig/legendary")
+            if os.path.isdir(config):
+                env["LEGENDARY_CONFIG_PATH"] = config
+            args = [legendary, "launch", _IC_EGS_APP_ID, "--language", "en"]
+            if os.path.exists("/usr/bin/wine"):
+                args += ["--wine", "/usr/bin/wine"]
+            subprocess.Popen(args, env=env, close_fds=True,
+                             stdout=subprocess.DEVNULL,
+                             stderr=subprocess.DEVNULL)
+            return 0  # Let the PID scanner find the game process
         except Exception:
             pass
 
-    # Check if it's a Windows path to IdleDragons.exe - try direct Wine launch
-    if "IdleDragons.exe" in command and os.path.exists(command):
-        try:
-            # Try launching directly via wine (may use cached credentials)
-            process = subprocess.Popen(
-                [command], close_fds=True,
-                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            return process.pid
-        except Exception:
-            pass
+    if not command:
+        return 0
 
-    # Check if it's a URI (e.g., legendary://)
+    # A URI handler (e.g. heroic://launch/...)
     if "://" in command.split(" ", 1)[0]:
         try:
             subprocess.Popen(["xdg-open", command], close_fds=True)
-            return 0
         except Exception:
-            return 0
+            pass
+        return 0
 
-    # Try as a shell command (default fallback)
+    # Direct executable (e.g. a wine wrapper script), else a shell command
     try:
         process = subprocess.Popen(command, shell=True, close_fds=True,
                                    stdout=subprocess.DEVNULL,
@@ -263,6 +276,24 @@ def _get_window_tree(root=None):
     return windows
 
 
+def _candidate_windows():
+    """Top-level application windows via the EWMH _NET_CLIENT_LIST root
+    property - one X round-trip instead of a full recursive tree walk
+    (this runs on the GUI timer and per key batch, so speed matters).
+    Falls back to the tree walk if the WM doesn't provide the list."""
+    try:
+        dpy = _get_display()
+        root = _get_screen().root
+        prop = root.get_full_property(dpy.get_atom("_NET_CLIENT_LIST"),
+                                      X.AnyPropertyType)
+        if prop and prop.value:
+            return [dpy.create_resource_object("window", wid)
+                    for wid in prop.value]
+    except Exception:
+        pass
+    return _get_window_tree()
+
+
 def window_pid(hwnd):
     """Get the PID of a window (read _NET_WM_PID)."""
     try:
@@ -277,7 +308,7 @@ def window_pid(hwnd):
 
 def find_window_by_pid(pid):
     """First visible window matching the PID."""
-    for window in _get_window_tree():
+    for window in _candidate_windows():
         if _window_has_pid(window, pid) and _is_visible(window):
             return window
     return None
@@ -286,10 +317,11 @@ def find_window_by_pid(pid):
 def find_windows_by_exe(exe_name):
     """All visible windows whose process name matches the exe name.
     Returns [(window, pid), ...]."""
-    exe_lower = exe_name.lower()
     pids = {int(p) for p in find_pids(exe_name)}
+    if not pids:
+        return []
     result = []
-    for window in _get_window_tree():
+    for window in _candidate_windows():
         pid = window_pid(window)
         if pid in pids and _is_visible(window):
             result.append((window, pid))

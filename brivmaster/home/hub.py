@@ -159,25 +159,28 @@ class HomeHub:
             return  # already running
         args = [sys.executable, "-m", "brivmaster.run_farm",
                 "--settings", self.settings_path]
+        # Farm output goes to a file, never a pipe: an undrained pipe fills
+        # up and blocks the farm mid-run once the buffer is full.
+        logs_dir = os.path.join(os.path.dirname(os.path.abspath(
+            self.settings_path)), "Logs")
+        log_path = os.path.join(logs_dir, "FarmConsole.log")
         try:
-            self.farm_process = subprocess.Popen(
-                args,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True
-            )
-            self.status_message = f"Farm starting (PID: {self.farm_process.pid})..."
-
-            # Check if process exited immediately (error condition)
-            import time
+            os.makedirs(logs_dir, exist_ok=True)
+            with open(log_path, "w", encoding="utf-8") as log_file:
+                self.farm_process = subprocess.Popen(
+                    args, stdout=log_file, stderr=subprocess.STDOUT)
+            self.status_message = \
+                f"Farm starting (PID: {self.farm_process.pid})..."
             time.sleep(0.5)
-            ret_code = self.farm_process.poll()
-            if ret_code is not None:
-                # Process exited - capture error
-                stdout, stderr = self.farm_process.communicate()
-                error_msg = (stderr or stdout or "Unknown error").strip()
+            if self.farm_process.poll() is not None:
+                try:
+                    with open(log_path, encoding="utf-8") as f:
+                        tail = f.read().strip().splitlines()
+                    error_msg = tail[-1] if tail else "Unknown error"
+                except OSError:
+                    error_msg = "Unknown error"
                 self.status_message = f"Farm failed: {error_msg[:150]}"
-        except Exception as err:
+        except Exception as err:  # noqa: BLE001
             self.status_message = f"Error starting farm: {err}"
         # The GUI retries Connect on its timer until the endpoint appears
 

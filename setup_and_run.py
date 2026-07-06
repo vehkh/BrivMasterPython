@@ -67,14 +67,14 @@ def get_os():
         return "unknown"
 
 
-def run_command(cmd, shell=False, capture=False):
+def run_command(cmd, shell=False, capture=False, timeout=30):
     """Run a shell command safely"""
     try:
         if capture:
-            result = subprocess.run(cmd, shell=shell, capture_output=True, text=True, timeout=30)
+            result = subprocess.run(cmd, shell=shell, capture_output=True, text=True, timeout=timeout)
             return result.returncode == 0, result.stdout.strip()
         else:
-            result = subprocess.run(cmd, shell=shell, timeout=30)
+            result = subprocess.run(cmd, shell=shell, timeout=timeout)
             return result.returncode == 0
     except subprocess.TimeoutExpired:
         return False
@@ -84,7 +84,7 @@ def run_command(cmd, shell=False, capture=False):
 
 def check_python():
     """Verify Python version and architecture"""
-    print_step(1, 7, "Checking Python")
+    print_step(1, 8, "Checking Python")
 
     version_info = sys.version_info
     if version_info.major < 3 or (version_info.major == 3 and version_info.minor < 10):
@@ -102,11 +102,12 @@ def check_python():
 
 def install_dependencies():
     """Install required Python packages"""
-    print_step(2, 7, "Checking dependencies")
+    print_step(2, 8, "Checking dependencies")
 
     required_packages = {
         'Xlib': 'python-xlib',
-        'pynput': 'pynput'
+        'pynput': 'pynput',
+        'PySide6': 'PySide6',
     }
 
     missing = []
@@ -119,7 +120,7 @@ def install_dependencies():
     if missing:
         print(f"Installing {', '.join(missing)}...", flush=True)
         cmd = [sys.executable, "-m", "pip", "install", "-q"] + missing
-        if not run_command(cmd):
+        if not run_command(cmd, timeout=600):
             print_error(f"Failed to install packages: {', '.join(missing)}")
             return False
         print_ok("Packages installed")
@@ -134,11 +135,11 @@ def check_ptrace_permission():
     os_type = get_os()
 
     if os_type != "linux":
-        print_step(3, 7, "Checking ptrace permission")
+        print_step(3, 8, "Checking ptrace permission")
         print_ok("Not required on this OS")
         return True
 
-    print_step(3, 7, "Checking ptrace permission")
+    print_step(3, 8, "Checking ptrace permission")
 
     try:
         with open("/proc/sys/kernel/yama/ptrace_scope", "r") as f:
@@ -165,7 +166,7 @@ def check_ptrace_permission():
 
 def check_heroic(os_type):
     """Verify Heroic installation"""
-    print_step(4, 7, "Checking Heroic installation")
+    print_step(4, 8, "Checking Heroic installation")
 
     if os_type == "windows":
         # On Windows, Heroic might be in AppData or Program Files
@@ -234,7 +235,7 @@ def find_game_path(os_type):
 
 def check_game_installation(os_type):
     """Verify Idle Champions installation"""
-    print_step(5, 7, "Checking game installation")
+    print_step(5, 8, "Checking game installation")
 
     if os_type == "windows":
         # Windows: check in Heroic directory
@@ -279,7 +280,7 @@ def check_game_installation(os_type):
 
 def check_offsets():
     """Verify offsets are available"""
-    print_step(6, 7, "Checking offsets")
+    print_step(6, 8, "Checking offsets")
 
     offsets_file = Path("../BrivMaster/Offsets/IC_Offsets.json")
 
@@ -307,7 +308,7 @@ def check_offsets():
 
 def configure_game_path(os_type):
     """Auto-detect and set IBM_Game_Path and platform-specific IBM_Game_Launch"""
-    print_step(6, 8, "Configuring game paths")
+    print_step(7, 8, "Configuring game paths")
 
     game_path = find_game_path(os_type)
     if not game_path:
