@@ -423,9 +423,9 @@ class HomeWindow(QMainWindow):
             button.clicked.connect(slot)
             button_row.addWidget(button)
         manager_layout.addLayout(button_row)
-        self.levels_table = QTableWidget(0, 6)
+        self.levels_table = QTableWidget(0, 7)
         self.levels_table.setHorizontalHeaderLabels(
-            ["Hero ID", "Start (z1)", "Priority", "Prio limit",
+            ["Hero ID", "Name", "Start (z1)", "Priority", "Prio limit",
              "Normal (min)", "Feats"])
         manager_layout.addWidget(self.levels_table)
         self.levels_note = QLabel(
@@ -510,17 +510,36 @@ class HomeWindow(QMainWindow):
         for hero_id, data in sorted(levels.items(), key=lambda p: int(p[0])):
             self._levels_append_row(hero_id, data)
 
+    def _hero_name(self, hero_id):
+        """Champion name from game memory (as the AHK GUI's ReadName);
+        empty string when the game is not readable."""
+        try:
+            hero_id = int(hero_id)
+        except (TypeError, ValueError):
+            return ""
+        try:
+            memory = self.hub.ctx.memory
+            if not memory.IsAttached:
+                exe = self.hub.ctx.setting("IBM_Game_Exe", "IdleDragons.exe")
+                if memory.AttachToReadyInstance(exe, wait_s=0) is None:
+                    return ""
+            hero = self.hub.ctx.heroes[hero_id]
+            return (hero.ReadName() or "") if hero else ""
+        except Exception:  # noqa: BLE001 - names are cosmetic
+            return ""
+
     def _levels_append_row(self, hero_id, data):
         row = self.levels_table.rowCount()
         self.levels_table.insertRow(row)
         feat_list = data.get("Feat_List") or {}
         feats = (f"{len(feat_list)}"
                  f"{'' if data.get('Feat_Exclusive') else '+'}")
-        values = (hero_id, data.get("z1", 0), data.get("prio", 0),
-                  data.get("priolimit", ""), data.get("min", 0), feats)
+        values = (hero_id, self._hero_name(hero_id), data.get("z1", 0),
+                  data.get("prio", 0), data.get("priolimit", ""),
+                  data.get("min", 0), feats)
         for column, value in enumerate(values):
             item = QTableWidgetItem("" if value in (None, "") else str(value))
-            if column == 5:
+            if column in (1, 6):  # Name and Feats are display-only
                 item.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable)
             self.levels_table.setItem(row, column, item)
 
@@ -541,9 +560,9 @@ class HomeWindow(QMainWindow):
                 text = cell(column)
                 return int(text) if text.lstrip("-").isdigit() else default
             levels[hero_id] = {
-                "z1": num(1), "prio": num(2),
-                "priolimit": num(3) if cell(3) else "",
-                "min": num(4),
+                "z1": num(2), "prio": num(3),
+                "priolimit": num(4) if cell(4) else "",
+                "min": num(5),
                 "Feat_List": previous.get("Feat_List", ""),
                 "Feat_Exclusive": previous.get("Feat_Exclusive", ""),
             }
@@ -574,6 +593,16 @@ class HomeWindow(QMainWindow):
                                             {"z1": 0, "prio": 0,
                                              "priolimit": "", "min": 0})
                     added += 1
+        # Fill in names that were blank (e.g. GUI opened before the game)
+        for row in range(self.levels_table.rowCount()):
+            name_item = self.levels_table.item(row, 1)
+            id_item = self.levels_table.item(row, 0)
+            if id_item and (name_item is None or not name_item.text()):
+                name = self._hero_name(id_item.text())
+                if name:
+                    item = QTableWidgetItem(name)
+                    item.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable)
+                    self.levels_table.setItem(row, 1, item)
         self.status_label.setText(f"Refresh Formations: added {added} champion(s)")
 
     def _levels_add_row(self):
