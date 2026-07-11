@@ -16,7 +16,7 @@ Windows and Linux versions are now complete and validated.
 | Platform | State |
 |---|---|
 | **Windows** | Working - all test stages passed. Validated on a real end-game farm including a **73-hour / 5,582-run unattended soak at -2% BPH vs the AHK original** (20.5k BPH), with 0 fails on healthy servers: Ellywick Casino with re-rolls, combined Thellora+Briv start, feat-swap jump routing, online stacking (exact stack targets), offline/blank/relay restarts, Steelbones-to-Haste conversion saves, chest buying/daily platinum, game-settings profiles, and automatic crash recovery (~50s back to farming after a killed game). Full results in `TESTING.md`. |
-| **Linux** | **Working** - Full X11 backend (window management, key injection), Heroic legendary launcher integration, cross-platform auto-detection, universal setup script. Memory reading via `process_vm_readv` and `/proc/<pid>/mem`. All test stages passed. Requires `kernel.yama.ptrace_scope=0` for memory access. Run with `python setup_and_run.py`. |
+| **Linux** | **Working** - Full X11 backend (window management, key injection), Heroic legendary launcher integration, cross-platform auto-detection, universal setup script. Memory reading via `process_vm_readv` and `/proc/<pid>/mem`. All test stages passed, including live farm cycles on KDE Plasma **Wayland** (game under XWayland). Requires `kernel.yama.ptrace_scope=0` for memory access. Run with `python setup_and_run.py`. |
 | **Mac** | **Supported** - X11 backend with same architecture as Linux. Untested (no hardware available) but should work. Requires `python-xlib` and Wine/Proton. |
 
 What's included: the gem farm itself, the Home GUI (PySide6 - live status,
@@ -127,13 +127,23 @@ targets it uniformly.
 
 **Linux implementation (complete and tested):**
 - ✅ Memory backend: `process_vm_readv` + `/proc/<pid>/mem` for reading game state
-- ✅ X11 input backend: pynput for key injection to Wine windows
-- ✅ Window management: EWMH protocol for window discovery/activation/close
+- ✅ X11 input backend: XTEST/pynput key injection to Wine windows (Wine
+  ignores synthetic `XSendEvent` keys, so input goes to the focused window -
+  the farm verifies and re-acquires game focus before every key batch)
+- ✅ Window management: EWMH protocol for window discovery/activation/close,
+  with a KWin scripting D-Bus fallback for activation on Plasma Wayland
+  (where KWin ignores X11 focus requests)
 - ✅ Process management: find Wine processes, handle lifecycle
 - ✅ Heroic launcher: legendary CLI integration with EGS authentication
 - ✅ Universal setup script: auto-detects and configures everything
 - ✅ Cross-platform auto-detection: selects correct backend per platform
 - ✅ Ptrace permission: setup script configures `kernel.yama.ptrace_scope=0`
+
+**Wayland note:** unlike Windows (background `PostMessage`), Linux key
+injection lands in the *focused* window, so the farm keeps the game window
+active while it levels champions and swaps formations. To keep using your
+desktop while farming, run the game on an isolated display
+(`BRIVMASTER_DISPLAY` - see `SETTINGS_BY_PLATFORM.md`).
 
 **Recommended setup:**
 - **Linux:** Heroic with Wine/Proton-GE (or native Proton/Wine)
