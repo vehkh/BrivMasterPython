@@ -470,6 +470,14 @@ class WorkList:
                 # target rather than crossing it (a Feat-Guard cap breach
                 # is permanent; a few missing levels are not). With the AHK
                 # x25 this never triggered - targets were multiples of 25.
+                # Exception: a champion still at level 0 is not placed at
+                # all (e.g. Thellora with min=1) - placement outweighs
+                # overshooting a tiny target, so cross like the AHK did.
+                if (levels_required > 0
+                        and champion.Current.level
+                        + champion.Current.pending_levels <= 0):
+                    key_list.append(champion.Key)
+                    champion.Current.pending_levels += modifier_amount
                 champ_list.pop(champ_id, None)
             return None
 
