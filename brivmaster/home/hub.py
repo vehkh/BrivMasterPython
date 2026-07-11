@@ -146,7 +146,12 @@ class HomeHub:
         """Attach to a running farm via the endpoint file."""
         try:
             client = IpcClient()
-            client.ping()
+            if not client.ping():
+                # Endpoint file is stale (farm crashed or was killed):
+                # nothing is listening, so the farm is NOT running - and
+                # Run_Clicked must not early-return on a phantom connect.
+                client.close()
+                raise IpcError("no reply from endpoint")
             self.farm_ipc = client
             self._on_connected()
             return True
@@ -167,9 +172,14 @@ class HomeHub:
         log_path = os.path.join(logs_dir, "FarmConsole.log")
         try:
             os.makedirs(logs_dir, exist_ok=True)
+            # cwd: the package's parent, so -m brivmaster.run_farm resolves
+            # no matter where the GUI itself was launched from
+            package_root = os.path.dirname(os.path.dirname(os.path.dirname(
+                os.path.abspath(__file__))))
             with open(log_path, "w", encoding="utf-8") as log_file:
                 self.farm_process = subprocess.Popen(
-                    args, stdout=log_file, stderr=subprocess.STDOUT)
+                    args, stdout=log_file, stderr=subprocess.STDOUT,
+                    cwd=package_root)
             self.status_message = \
                 f"Farm starting (PID: {self.farm_process.pid})..."
             time.sleep(0.5)
@@ -212,6 +222,12 @@ class HomeHub:
                 and self.farm_process.poll() is not None:
             self.farm_process = None
         if self._farm_pid() is None:
+            # A killed farm never unlinks its endpoint file; clean it up so
+            # the next Connect/Run does not chase a dead endpoint.
+            try:
+                os.unlink(endpoint_file_path())
+            except OSError:
+                pass
             self.status_message = "Gem Farm Stopped"
         else:
             self.status_message = f"Gem Farm still alive (PID {pid})"
