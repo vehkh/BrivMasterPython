@@ -33,6 +33,10 @@ WINDOWS_EXTRAS = [
     ("tzdata", "tzdata", "IANA timezone data for the Diana daily-reset "
                          "window (optional; a built-in fallback exists)", False),
 ]
+LINUX_MAC_EXTRAS = [
+    ("python-xlib", "Xlib", "X11 window discovery/control (farm input)", True),
+    ("pynput", "pynput", "key injection to the game window", True),
+]
 
 PASS, FAIL, WARN = "[ ok ]", "[FAIL]", "[warn]"
 failures = []
@@ -89,7 +93,9 @@ def check_pip():
 
 
 def install(pip_name):
-    for extra_args in ([], ["--user"]):
+    # --break-system-packages: PEP 668 distros refuse pip installs outside a
+    # venv; --user keeps it contained to the account either way
+    for extra_args in ([], ["--user"], ["--user", "--break-system-packages"]):
         result = subprocess.run(
             [sys.executable, "-m", "pip", "install", "--quiet", pip_name,
              *extra_args], capture_output=True, text=True)
@@ -104,6 +110,8 @@ def check_requirements(do_install, have_pip):
     requirements = list(REQUIREMENTS)
     if sys.platform == "win32":
         requirements += WINDOWS_EXTRAS
+    else:
+        requirements += LINUX_MAC_EXTRAS
     for pip_name, import_name, why, required in requirements:
         try:
             module = importlib.import_module(import_name)
@@ -191,10 +199,26 @@ def platform_notes():
               "from an elevated prompt too.")
     elif sys.platform.startswith("linux"):
         print("Linux notes:")
-        print("         Memory reads need ptrace permission: "
-              "sudo sysctl kernel.yama.ptrace_scope=0")
-        print("         The X11 input backend is not implemented yet - "
-              "only the read-only probe works so far.")
+        try:
+            with open("/proc/sys/kernel/yama/ptrace_scope") as f:
+                scope = f.read().strip()
+        except OSError:
+            scope = "0"  # no Yama LSM
+        if scope == "0":
+            print("         [ ok ] ptrace_scope = 0 (memory reads allowed)")
+        else:
+            report(WARN, f"ptrace_scope = {scope} - memory reads will fail; "
+                         "run: sudo sysctl kernel.yama.ptrace_scope=0")
+        if not os.environ.get("DISPLAY"):
+            report(WARN, "no $DISPLAY - the farm needs an X server (Xorg or "
+                         "XWayland); see setup_and_run.py for guidance")
+        elif os.environ.get("XDG_SESSION_TYPE") == "wayland":
+            print("         Wayland session: keys reach the game only while "
+                  "its window is focused;")
+            print("         the farm re-focuses it per key batch (KWin D-Bus "
+                  "on KDE). To farm in the")
+            print("         background, use BRIVMASTER_DISPLAY (see "
+                  "SETTINGS_BY_PLATFORM.md).")
 
 
 def main():
@@ -222,7 +246,8 @@ def main():
               "lines above")
     else:
         print("RESULT: OK - everything ready")
-    print("Next: python tools\\probe.py --wait 60   (game running; validates "
+    probe = "tools\\probe.py" if sys.platform == "win32" else "tools/probe.py"
+    print(f"Next: python {probe} --wait 60   (game running; validates "
           "memory reads)")
     return 0
 
