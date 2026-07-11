@@ -10,6 +10,7 @@ scope (the COM SharedRunData replacement).
 from __future__ import annotations
 
 import datetime
+import json
 import os
 import subprocess
 import sys
@@ -17,7 +18,7 @@ import time
 
 from ..farm.ctx import FarmContext, precise_sleep, tick_ms
 from ..farm.heroes import Heroes
-from ..ipc import IpcClient, IpcError
+from ..ipc import IpcClient, IpcError, endpoint_file_path
 from ..memory.functions import MemoryFunctions
 from ..platform import window_backend
 from ..platform.input import InputManager
@@ -186,14 +187,66 @@ class HomeHub:
 
     def Stop_Clicked(self):
         self.status_message = "Closing Gem Farm"
+        if self.farm_ipc is None:  # Stop must work without a prior Connect
+            try:
+                self.farm_ipc = IpcClient()
+            except (IpcError, OSError, ValueError):
+                self.farm_ipc = None
         if self.farm_ipc is not None:
             try:
                 self.farm_ipc.call("control", "Stop")
-                self.status_message = "Gem Farm Stopped"
             except IpcError:
-                self.status_message = "Gem Farm not running"
+                pass
             self.farm_ipc.close()
             self.farm_ipc = None
+        pid = self._farm_pid()
+        if pid is None:
+            self.status_message = "Gem Farm not running"
+            return
+        # The stop flag is only honoured between farm loop iterations; a
+        # farm stuck inside a recovery loop never reads it. Escalate.
+        if not self._wait_farm_exit(pid, 3.0):
+            self._win.terminate_process(pid)
+            self._wait_farm_exit(pid, 2.0)
+        if self.farm_process is not None \
+                and self.farm_process.poll() is not None:
+            self.farm_process = None
+        if self._farm_pid() is None:
+            self.status_message = "Gem Farm Stopped"
+        else:
+            self.status_message = f"Gem Farm still alive (PID {pid})"
+
+    def _farm_pid(self):
+        """PID of the running farm: our child if we started it, else the one
+        recorded in the IPC endpoint file (verified against a live python
+        process - the file can be stale after a hard kill)."""
+        proc = self.farm_process
+        if proc is not None and proc.poll() is None:
+            return proc.pid
+        try:
+            with open(endpoint_file_path(), encoding="utf-8") as f:
+                pid = json.load(f).get("pid")
+        except (OSError, ValueError):
+            return None
+        if not pid:
+            return None
+        name = (self._win.get_process_name(pid) or "").lower()
+        return pid if name.startswith("python") else None
+
+    def _wait_farm_exit(self, pid, timeout_s):
+        proc = self.farm_process \
+            if self.farm_process is not None and self.farm_process.pid == pid \
+            else None
+        deadline = time.time() + timeout_s
+        while time.time() < deadline:
+            if proc is not None:
+                if proc.poll() is not None:
+                    return True
+            elif not (self._win.get_process_name(pid) or "").lower() \
+                    .startswith("python"):
+                return True
+            time.sleep(0.2)
+        return False
 
     def _on_connected(self):
         exe = self.ctx.setting("IBM_Game_Exe", "IdleDragons.exe")
