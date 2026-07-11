@@ -124,6 +124,15 @@ def get_process_name(pid):
         path = os.readlink(f"/proc/{pid}/exe")
         return os.path.basename(path)
     except (OSError, FileNotFoundError):
+        # A zombie has no exe but still answers via comm; it's dead, just
+        # not reaped yet - callers use the name to verify a live process.
+        try:
+            with open(f"/proc/{pid}/stat", "rb") as f:
+                stat = f.read()
+            if stat[stat.rindex(b")") + 2:].lstrip().startswith(b"Z"):
+                return None
+        except (OSError, ValueError):
+            return None
         # Fall back to /proc/<pid>/comm (truncated to 15 chars)
         try:
             with open(f"/proc/{pid}/comm", "r") as f:
@@ -381,8 +390,71 @@ def activate_window(hwnd):
         pass
 
 
+def _x_focus_is(hwnd):
+    try:
+        current = _get_display().get_input_focus().focus
+        return getattr(current, "id", None) == hwnd.id
+    except Exception:
+        return False
+
+
+_kwin_last_attempt = 0.0
+
+
+def _kwin_activate_pid(pid):
+    """Plasma Wayland: X clients cannot change the active window
+    (set_input_focus and _NET_ACTIVE_WINDOW requests are ignored by KWin),
+    but KWin's own scripting D-Bus API can activate it."""
+    global _kwin_last_attempt
+    import time as _time
+    if _time.monotonic() - _kwin_last_attempt < 2.0:
+        return False  # don't spam busctl when activation keeps failing
+    _kwin_last_attempt = _time.monotonic()
+    script = (
+        'var wins = typeof workspace.windowList === "function" ? '
+        'workspace.windowList() : workspace.clientList();\n'
+        'for (var i = 0; i < wins.length; i++) {\n'
+        '  if (wins[i].pid == %d) {\n'
+        '    if ("activeWindow" in workspace) workspace.activeWindow = wins[i];\n'
+        '    else workspace.activeClient = wins[i];\n'
+        '  }\n'
+        '}\n' % pid)
+    import tempfile
+    try:
+        with tempfile.NamedTemporaryFile("w", suffix=".js", delete=False,
+                                         prefix="brivmaster_focus_") as f:
+            f.write(script)
+            path = f.name
+        try:
+            out = subprocess.run(
+                ["busctl", "--user", "call", "org.kde.KWin", "/Scripting",
+                 "org.kde.kwin.Scripting", "loadScript", "s", path],
+                capture_output=True, text=True, timeout=5)
+            if out.returncode != 0:
+                return False
+            script_id = out.stdout.split()[1]
+            subprocess.run(
+                ["busctl", "--user", "call", "org.kde.KWin",
+                 f"/Scripting/Script{script_id}", "org.kde.kwin.Script", "run"],
+                capture_output=True, timeout=5)
+            subprocess.run(
+                ["busctl", "--user", "call", "org.kde.KWin", "/Scripting",
+                 "org.kde.kwin.Scripting", "unloadScript", "s", path],
+                capture_output=True, timeout=5)
+            return True
+        finally:
+            os.unlink(path)
+    except Exception:
+        return False
+
+
 def control_focus(hwnd):
-    """Give a window keyboard focus (without necessarily raising it)."""
+    """Give a window keyboard focus (without necessarily raising it).
+
+    Keys are injected with XTEST, which delivers to the X focus window -
+    so this must actually land, not just be requested. Under a Wayland
+    compositor set_input_focus alone often has no effect; fall back to
+    asking KWin directly."""
     if not hwnd:
         return False
     try:
@@ -395,15 +467,21 @@ def control_focus(hwnd):
         # Skip the focus request when the window already has it: the farm
         # calls this before every key batch, and redundant set_input_focus
         # requests add churn/flicker on the desktop.
-        try:
-            current = _get_display().get_input_focus().focus
-            if getattr(current, "id", None) == hwnd.id:
-                return True
-        except Exception:
-            pass
+        if _x_focus_is(hwnd):
+            return True
         hwnd.set_input_focus(X.RevertToPointerRoot, 0)  # timestamp=0 (current)
         _get_display().sync()
-        return True
+        if _x_focus_is(hwnd):
+            return True
+        pid = window_pid(hwnd)
+        if pid and _kwin_activate_pid(pid):
+            import time as _time
+            deadline = _time.monotonic() + 0.5
+            while _time.monotonic() < deadline:
+                if _x_focus_is(hwnd):
+                    return True
+                _time.sleep(0.02)
+        return _x_focus_is(hwnd)
     except Exception:
         # X11 operation may fail on Wine - that's OK, farm can proceed
         return True
