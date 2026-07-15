@@ -66,13 +66,7 @@ class GameSettingsProfiles:
 
     def is_game_closed(self):
         exe = self._ctx.setting("IBM_Game_Exe", "IdleDragons.exe")
-        if self._win.find_window_by_exe(exe):
-            return False
-        # Isolated-display mode: the window is on another X display -
-        # check the process so 'Set Now' cannot write under a running game
-        if os.environ.get("BRIVMASTER_DISPLAY"):
-            return not self._win.find_pids(exe)
-        return True
+        return not self._win.find_window_by_exe(exe)
 
     def _profile(self):
         hub = self._ctx.settings.get("HUB", {})

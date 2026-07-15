@@ -12,8 +12,7 @@ class LevelData:
 
     __slots__ = ("min", "z1", "z1c", "priority", "priority_limit",
                  "pending_levels", "level", "casino_levelling",
-                 "use_modifier_for_fast", "optimistic_level",
-                 "optimistic_expiry")
+                 "use_modifier_for_fast")
 
     def __init__(self):
         self.min = 0
@@ -24,11 +23,6 @@ class LevelData:
         self.pending_levels = 0
         self.level = 0
         self.casino_levelling = 0
-        # In-flight press floor: presses sent but possibly not yet visible
-        # in memory (Wine input latency). NeedsLevelling honours this so a
-        # later worklist does not re-press off a stale read.
-        self.optimistic_level = 0
-        self.optimistic_expiry = 0
         self.use_modifier_for_fast = False
 
     def clone(self):
@@ -227,13 +221,8 @@ class Hero:
         return 0
 
     def NeedsLevelling(self, mode="min"):
-        from .ctx import tick_ms
         level = self.ReadLevel()
-        level = level if level is not None else 0
-        if (self.Current.optimistic_level > level
-                and tick_ms() < self.Current.optimistic_expiry):
-            level = self.Current.optimistic_level
-        self.Current.level = level
+        self.Current.level = level if level is not None else 0
         if mode == "z1":
             return self.Current.level < self.Current.z1
         if mode == "min":

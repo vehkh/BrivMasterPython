@@ -778,20 +778,15 @@ class RouteMaster:
         # Note: the AHK original has 'if (inZone.jumpsToFinish:=-1)' - an
         # assignment, so the 'not yet processed' check is always true and
         # every visit overwrites. Ported as-is for identical behaviour.
-        # Iterative rather than recursive: a walk-every-zone route makes the
-        # chain as long as the target zone, past Python's recursion limit.
-        stack = [(current_zone, starting_jumps)]
-        while stack:
-            zone, jumps = stack.pop()
-            for in_zone in zone.incomingZones.values():
-                jumps_done = jumps
-                if in_zone.jumpZone:
-                    jumps_done += 1
-                elif self.IsFeatSwap():
-                    jumps_done += 1
-                in_zone.jumpsToFinish = jumps_done
-                in_zone.stacksToFinish = jump_cost(jumps_done)
-                stack.append((in_zone, jumps_done))
+        for in_zone in current_zone.incomingZones.values():
+            jumps_done = starting_jumps
+            if in_zone.jumpZone:
+                jumps_done += 1
+            elif self.IsFeatSwap():
+                jumps_done += 1
+            in_zone.jumpsToFinish = jumps_done
+            in_zone.stacksToFinish = jump_cost(jumps_done)
+            self.JumpsRecurse(in_zone, jumps_done)
 
     def ProcessRoute(self, current_zone):
         ctx = self._ctx

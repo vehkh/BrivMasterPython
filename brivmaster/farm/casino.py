@@ -86,10 +86,6 @@ class EllywickCasino:
             num_gem_cards = elly.GetNumGemCards()
             if num_cards is None:
                 break  # abort - memory reads unavailable
-            if num_gem_cards is None:
-                # AHK compares "" < n as true; a failed gem-card read must
-                # not crash the Casino - treat as no gem cards yet
-                num_gem_cards = 0
             if num_cards < self.MinCards or num_gem_cards < self.GemCardsNeeded:
                 if self.MaxRedraws - self.Redraws > 0:
                     if not self.UsedUlt and self.ShouldRedraw(num_cards,
@@ -247,20 +243,13 @@ class DialogSwatter:
         self._stop.set()
 
     def _run(self):
-        while not self._stop.is_set():
-            active = False
+        while not self._stop.is_set() and tick_ms() <= self._deadline:
             try:
                 if self._ctx.memory.ReadWelcomeBackActive():
-                    active = True
                     with self._ctx.critical:
                         self._key_esc.key_press()
             except Exception:  # noqa: BLE001 - reads race game restarts
                 pass
-            # As in the AHK: the 3s deadline only stops the timer while the
-            # dialog is NOT showing - keep swatting an active dialog (slow
-            # Wine loads can show it later/longer than 3s)
-            if not active and tick_ms() > self._deadline:
-                break
             time.sleep(0.1)
 
 

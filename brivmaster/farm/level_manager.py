@@ -35,11 +35,6 @@ class LevelManager:
         self.KEY_Modifier = ctx.input.get_key(
             "LCtrl" if mod_key == "Ctrl" else mod_key)
         self.modifierLevelUpAmount = ctx.setting("IBM_Level_Options_Mod_Value", 25)
-        # The click-damage widget only reflects the Ctrl multiplier, so the
-        # memory confirmation in SetModifierKey is meaningless for other
-        # modifiers (e.g. Shift/x10, the reliable choice under Wine, where
-        # the game does not see a virtual Ctrl at all).
-        self.modifierConfirmable = (mod_key == "Ctrl")
         self.clickDamageTargetFinal = 0
         self.clickDamageTargetRush = 0
 
@@ -84,18 +79,12 @@ class LevelManager:
         else:
             champion_ids = self.savedFormationChamps.get(formation_index, {})
         pending = 0
-        self.currentWorkList = WorkList(self._ctx, self, mode, formation_index)
+        self.currentWorkList = WorkList(self._ctx, self, mode)
         for champ_id in champion_ids:
             pending += self.currentWorkList.AddChamp(champ_id, suppress_by_id,
                                                      wait_for_gold)
         if pending == 0 and formation_index:
-            heroes = self._ctx.heroes
-            floors_active = any(
-                heroes[champ_id] is not None
-                and tick_ms() < heroes[champ_id].Current.optimistic_expiry
-                for champ_id in champion_ids)
-            if not floors_active:
-                self.levelingDone.setdefault(formation_index, {})[mode] = True
+            self.levelingDone.setdefault(formation_index, {})[mode] = True
 
     def GetClickDamageTargetLevel(self):
         memory = self._ctx.memory
@@ -265,45 +254,7 @@ class LevelManager:
                 level_settings, self.savedFormationChamps)
 
     def SetModifierKey(self, use_modifier):
-        """Returns True when memory confirms the level-up amount changed.
-        Callers must skip modifier presses on False: an unregistered
-        modifier turns every x25 press into x100 and overshoots the caps
-        (seen on Linux, where key injection can miss a busy window)."""
         memory = self._ctx.memory
-        if not self.modifierConfirmable:
-            if not use_modifier:
-                self.KEY_Modifier.release_bulk()
-                precise_sleep(60)
-                return True
-            # No widget feedback for this modifier (it only tracks Ctrl).
-            # Confirm with a sacrificial click-damage press instead: click
-            # levels in the same x10/x100 steps, has no specialisation
-            # levels, and gets levelled by the script anyway - so a probe
-            # that lands as x100 costs nothing, while a champion press
-            # with a missed modifier overshoots a Feat-Guard cap for the
-            # whole run.
-            self._ctx.input.game_focus()
-            self.KEY_Modifier.press_bulk()
-            precise_sleep(60)
-            if (memory.IBM_ReadClickLevelUpAllowed() or 0) <= 0:
-                # Click at its cap - cannot probe; trust after a settle
-                precise_sleep(120)
-                return True
-            before = memory.ReadClickLevel()
-            if before is None:
-                precise_sleep(120)
-                return True
-            self.KEY_ClickDmg.key_press_bulk()
-            start_time = tick_ms()
-            while tick_ms() - start_time < 500:
-                level = memory.ReadClickLevel()
-                if level is not None and level != before:
-                    if level - before == self.modifierLevelUpAmount:
-                        return True  # game sees the modifier
-                    break  # landed as x100: modifier missed
-                precise_sleep(5)
-            self.KEY_Modifier.release_bulk()
-            return False
         if use_modifier:
             self.KEY_Modifier.press_bulk()
             start_time = tick_ms()
@@ -311,28 +262,22 @@ class LevelManager:
             while (memory.IBM_ClickDamageLevelAmount() != self.modifierLevelUpAmount
                    and tick_ms() - start_time < 100):
                 precise_sleep(1)
-            confirmed = (memory.IBM_ClickDamageLevelAmount()
-                         == self.modifierLevelUpAmount)
-            if not confirmed:  # do not leave a half-registered modifier down
-                self.KEY_Modifier.release_bulk()
-            return confirmed
-        self.KEY_Modifier.release_bulk()
-        start_time = tick_ms()
-        while (memory.IBM_ClickDamageLevelAmount() == self.modifierLevelUpAmount
-               and tick_ms() - start_time < 100):
-            precise_sleep(1)
-        return memory.IBM_ClickDamageLevelAmount() != self.modifierLevelUpAmount
+        else:
+            self.KEY_Modifier.release_bulk()
+            start_time = tick_ms()
+            while (memory.IBM_ClickDamageLevelAmount() == self.modifierLevelUpAmount
+                   and tick_ms() - start_time < 100):
+                precise_sleep(1)
 
 
 class WorkList:
     """IC_BrivMaster_LevelManager_WorkList_Class - one levelling job."""
 
-    def __init__(self, ctx, level_manager, mode, formation_index=None):
+    def __init__(self, ctx, level_manager, mode):
         self._ctx = ctx
         self.champs = {}
         self.parent = level_manager
         self.mode = mode
-        self.formation_index = formation_index
         self.minPriority = 0
         self.maxPriority = 0
 
@@ -341,10 +286,6 @@ class WorkList:
         ctx = self._ctx
         key_list_100 = []
         key_list_10 = []  # the modifier list - can be x10 or x25
-        favorite = {"Q": 1, "W": 2, "E": 3}.get(self.formation_index)
-        if favorite is not None and \
-                ctx.memory.ReadMostRecentFormationFavorite() != favorite:
-            return wait_for_gold  # swap still in flight - press next pass
         self.GetKeyList(max_key_presses, key_list_100, key_list_10,
                         force_priority)
         if not key_list_100 and not key_list_10:
@@ -361,13 +302,9 @@ class WorkList:
             for key in key_list_100:
                 key.key_press_bulk()
             if key_list_10:
-                # Skip the x25 presses entirely if the modifier did not
-                # register - they would land as x100 and overshoot the
-                # caps. UpdateLevels() clears pending, so the next loop
-                # iteration simply retries them.
-                if self.parent.SetModifierKey(True):
-                    for key in key_list_10:
-                        key.key_press_bulk()
+                self.parent.SetModifierKey(True)
+                for key in key_list_10:
+                    key.key_press_bulk()
                 self.parent.SetModifierKey(False)
         self.UpdateLevels()
         return wait_for_gold
@@ -413,11 +350,6 @@ class WorkList:
 
         def check_100(champ_list, champ_id, champion, levels_required,
                       key_list, cur_priority):
-            if levels_required > 0 and not champion.ReadSelectedInSeat():
-                # Seat shows another champion (shared seat / formation swap
-                # in flight): pressing now would level the wrong champion.
-                champ_list.pop(champ_id, None)
-                return None
             if levels_required >= 200:  # keep - needs more than one press
                 key_list.append(champion.Key)
                 champion.Current.pending_levels += 100
@@ -441,9 +373,6 @@ class WorkList:
 
         def check_10(champ_list, champ_id, champion, levels_required,
                      key_list, cur_priority):
-            if levels_required > 0 and not champion.ReadSelectedInSeat():
-                champ_list.pop(champ_id, None)
-                return None
             # z1c being dynamic means a champion can appear here for x10
             # after being ignored for x100
             if levels_required >= 100:
@@ -458,7 +387,7 @@ class WorkList:
                 if len(key_list) + occupied >= max_key_presses and \
                         (not force_priority or cur_priority <= 0):
                     return "break"
-            elif levels_required == modifier_amount:
+            elif levels_required > 0:
                 key_list.append(champion.Key)
                 champion.Current.pending_levels += modifier_amount
                 champ_list.pop(champ_id, None)
@@ -466,18 +395,6 @@ class WorkList:
                         (not force_priority or cur_priority <= 0):
                     return "break"
             else:
-                # Remainder smaller than one modifier press: stop UNDER the
-                # target rather than crossing it (a Feat-Guard cap breach
-                # is permanent; a few missing levels are not). With the AHK
-                # x25 this never triggered - targets were multiples of 25.
-                # Exception: a champion still at level 0 is not placed at
-                # all (e.g. Thellora with min=1) - placement outweighs
-                # overshooting a tiny target, so cross like the AHK did.
-                if (levels_required > 0
-                        and champion.Current.level
-                        + champion.Current.pending_levels <= 0):
-                    key_list.append(champion.Key)
-                    champion.Current.pending_levels += modifier_amount
                 champ_list.pop(champ_id, None)
             return None
 
@@ -492,45 +409,7 @@ class WorkList:
                 and champ.CheckZ1cAllowed(self.mode)}
 
     def UpdateLevels(self):
-        # Give the game a moment to apply the presses before re-reading:
-        # a stale level read here makes the next iteration press again,
-        # overshooting the target by a full press (seen under Wine, where
-        # input-to-game latency is higher than with Windows PostMessage).
-        pending = {champ_id: champ for champ_id, champ in self.champs.items()
-                   if champ.Current.pending_levels}
-        # Floor for cross-worklist reads: another worklist (z1 vs min) may
-        # re-read this hero before these presses reach game memory and
-        # would press again - the floor makes NeedsLevelling see at least
-        # what has already been sent, for a few seconds.
-        for champ in pending.values():
-            expected = champ.Current.level + champ.Current.pending_levels
-            if expected > champ.Current.optimistic_level:
-                champ.Current.optimistic_level = expected
-            champ.Current.optimistic_expiry = tick_ms() + 3000
-        deadline = tick_ms() + 800
-        while pending and tick_ms() < deadline:
-            for champ_id in list(pending):
-                champ = pending[champ_id]
-                level = champ.ReadLevel()
-                if level is not None and level >= (champ.Current.level
-                                                   + champ.Current.pending_levels):
-                    del pending[champ_id]
-            if pending:
-                precise_sleep(5)
-        # Champions still pending after the timeout: assume the presses WILL
-        # land rather than pressing again off a stale read. A lost press
-        # self-heals (the next LevelFormation pass re-reads and retries);
-        # an extra press overshoots past the Feat-Guard cap permanently.
-        for champ_id, champ in pending.items():
-            expected = champ.Current.level + champ.Current.pending_levels
-            champ.Current.level = expected
-            champ.Current.pending_levels = 0
-            target = champ.Current.z1 if self.mode == "z1" else champ.Current.min
-            if expected >= target:
-                del self.champs[champ_id]
         for champ_id in list(self.champs):
-            if champ_id in pending:
-                continue  # handled optimistically above
             self.champs[champ_id].Current.pending_levels = 0
             if not self.champs[champ_id].NeedsLevelling(self.mode):
                 del self.champs[champ_id]

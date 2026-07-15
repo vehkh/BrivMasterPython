@@ -423,9 +423,9 @@ class HomeWindow(QMainWindow):
             button.clicked.connect(slot)
             button_row.addWidget(button)
         manager_layout.addLayout(button_row)
-        self.levels_table = QTableWidget(0, 7)
+        self.levels_table = QTableWidget(0, 6)
         self.levels_table.setHorizontalHeaderLabels(
-            ["Hero ID", "Name", "Start (z1)", "Priority", "Prio limit",
+            ["Hero ID", "Start (z1)", "Priority", "Prio limit",
              "Normal (min)", "Feats"])
         manager_layout.addWidget(self.levels_table)
         self.levels_note = QLabel(
@@ -507,48 +507,8 @@ class HomeWindow(QMainWindow):
     def _load_levels_table(self):
         levels = self.hub.ctx.settings.get("IBM_LevelManager_Levels", {}) or {}
         self.levels_table.setRowCount(0)
-        for hero_id, data in self._levels_sorted(levels):
+        for hero_id, data in sorted(levels.items(), key=lambda p: int(p[0])):
             self._levels_append_row(hero_id, data)
-
-    def _levels_sorted(self, levels):
-        """Rows ordered by seat then hero ID, as the AHK GUI lists them;
-        falls back to plain ID order when the game is not readable."""
-        def sort_key(pair):
-            hero_id = int(pair[0])
-            seat = self._hero_seat(hero_id)
-            return (seat if seat else 99, hero_id)
-        return sorted(levels.items(), key=sort_key)
-
-    def _hero_seat(self, hero_id):
-        """Champion seat from game memory; None when not readable."""
-        try:
-            memory = self.hub.ctx.memory
-            if not memory.IsAttached:
-                exe = self.hub.ctx.setting("IBM_Game_Exe", "IdleDragons.exe")
-                if memory.AttachToReadyInstance(exe, wait_s=0) is None:
-                    return None
-            hero = self.hub.ctx.heroes[int(hero_id)]
-            return hero.ReadChampSeat() if hero else None
-        except Exception:  # noqa: BLE001 - ordering is cosmetic
-            return None
-
-    def _hero_name(self, hero_id):
-        """Champion name from game memory (as the AHK GUI's ReadName);
-        empty string when the game is not readable."""
-        try:
-            hero_id = int(hero_id)
-        except (TypeError, ValueError):
-            return ""
-        try:
-            memory = self.hub.ctx.memory
-            if not memory.IsAttached:
-                exe = self.hub.ctx.setting("IBM_Game_Exe", "IdleDragons.exe")
-                if memory.AttachToReadyInstance(exe, wait_s=0) is None:
-                    return ""
-            hero = self.hub.ctx.heroes[hero_id]
-            return (hero.ReadName() or "") if hero else ""
-        except Exception:  # noqa: BLE001 - names are cosmetic
-            return ""
 
     def _levels_append_row(self, hero_id, data):
         row = self.levels_table.rowCount()
@@ -556,12 +516,11 @@ class HomeWindow(QMainWindow):
         feat_list = data.get("Feat_List") or {}
         feats = (f"{len(feat_list)}"
                  f"{'' if data.get('Feat_Exclusive') else '+'}")
-        values = (hero_id, self._hero_name(hero_id), data.get("z1", 0),
-                  data.get("prio", 0), data.get("priolimit", ""),
-                  data.get("min", 0), feats)
+        values = (hero_id, data.get("z1", 0), data.get("prio", 0),
+                  data.get("priolimit", ""), data.get("min", 0), feats)
         for column, value in enumerate(values):
             item = QTableWidgetItem("" if value in (None, "") else str(value))
-            if column in (1, 6):  # Name and Feats are display-only
+            if column == 5:
                 item.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable)
             self.levels_table.setItem(row, column, item)
 
@@ -582,9 +541,9 @@ class HomeWindow(QMainWindow):
                 text = cell(column)
                 return int(text) if text.lstrip("-").isdigit() else default
             levels[hero_id] = {
-                "z1": num(2), "prio": num(3),
-                "priolimit": num(4) if cell(4) else "",
-                "min": num(5),
+                "z1": num(1), "prio": num(2),
+                "priolimit": num(3) if cell(3) else "",
+                "min": num(4),
                 "Feat_List": previous.get("Feat_List", ""),
                 "Feat_Exclusive": previous.get("Feat_Exclusive", ""),
             }
@@ -598,7 +557,8 @@ class HomeWindow(QMainWindow):
         if memory.AttachToReadyInstance(exe, wait_s=0) is None:
             self.status_label.setText("Refresh Formations: game not readable")
             return
-        merged = self._levels_collect()  # keep unsaved edits + Feat data
+        present = {str(self.levels_table.item(row, 0).text())
+                   for row in range(self.levels_table.rowCount())}
         added = 0
         slots = [memory.GetSavedFormationSlotByFavorite(1),
                  memory.GetSavedFormationSlotByFavorite(2),
@@ -608,14 +568,12 @@ class HomeWindow(QMainWindow):
             if slot is None or slot < 0:
                 continue
             for champ in (memory.GetFormationSaveBySlot(slot, True) or []):
-                if champ and str(champ) not in merged:
-                    merged[str(champ)] = {"z1": 0, "prio": 0,
-                                          "priolimit": "", "min": 0}
+                if champ and str(champ) not in present:
+                    present.add(str(champ))
+                    self._levels_append_row(str(champ),
+                                            {"z1": 0, "prio": 0,
+                                             "priolimit": "", "min": 0})
                     added += 1
-        # Rebuild seat-ordered; also (re)fills names now the game is readable
-        self.levels_table.setRowCount(0)
-        for hero_id, data in self._levels_sorted(merged):
-            self._levels_append_row(hero_id, data)
         self.status_label.setText(f"Refresh Formations: added {added} champion(s)")
 
     def _levels_add_row(self):

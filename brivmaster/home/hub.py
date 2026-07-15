@@ -10,7 +10,6 @@ scope (the COM SharedRunData replacement).
 from __future__ import annotations
 
 import datetime
-import json
 import os
 import subprocess
 import sys
@@ -18,7 +17,7 @@ import time
 
 from ..farm.ctx import FarmContext, precise_sleep, tick_ms
 from ..farm.heroes import Heroes
-from ..ipc import IpcClient, IpcError, endpoint_file_path
+from ..ipc import IpcClient, IpcError
 from ..memory.functions import MemoryFunctions
 from ..platform import window_backend
 from ..platform.input import InputManager
@@ -146,12 +145,7 @@ class HomeHub:
         """Attach to a running farm via the endpoint file."""
         try:
             client = IpcClient()
-            if not client.ping():
-                # Endpoint file is stale (farm crashed or was killed):
-                # nothing is listening, so the farm is NOT running - and
-                # Run_Clicked must not early-return on a phantom connect.
-                client.close()
-                raise IpcError("no reply from endpoint")
+            client.ping()
             self.farm_ipc = client
             self._on_connected()
             return True
@@ -165,104 +159,20 @@ class HomeHub:
             return  # already running
         args = [sys.executable, "-m", "brivmaster.run_farm",
                 "--settings", self.settings_path]
-        # Farm output goes to a file, never a pipe: an undrained pipe fills
-        # up and blocks the farm mid-run once the buffer is full.
-        logs_dir = os.path.join(os.path.dirname(os.path.abspath(
-            self.settings_path)), "Logs")
-        log_path = os.path.join(logs_dir, "FarmConsole.log")
-        try:
-            os.makedirs(logs_dir, exist_ok=True)
-            # cwd: the package's parent, so -m brivmaster.run_farm resolves
-            # no matter where the GUI itself was launched from
-            package_root = os.path.dirname(os.path.dirname(os.path.dirname(
-                os.path.abspath(__file__))))
-            with open(log_path, "w", encoding="utf-8") as log_file:
-                self.farm_process = subprocess.Popen(
-                    args, stdout=log_file, stderr=subprocess.STDOUT,
-                    cwd=package_root)
-            self.status_message = \
-                f"Farm starting (PID: {self.farm_process.pid})..."
-            time.sleep(0.5)
-            if self.farm_process.poll() is not None:
-                try:
-                    with open(log_path, encoding="utf-8") as f:
-                        tail = f.read().strip().splitlines()
-                    error_msg = tail[-1] if tail else "Unknown error"
-                except OSError:
-                    error_msg = "Unknown error"
-                self.status_message = f"Farm failed: {error_msg[:150]}"
-        except Exception as err:  # noqa: BLE001
-            self.status_message = f"Error starting farm: {err}"
+        self.farm_process = subprocess.Popen(args, close_fds=True)
+        self.status_message = "Starting Gem Farm..."
         # The GUI retries Connect on its timer until the endpoint appears
 
     def Stop_Clicked(self):
         self.status_message = "Closing Gem Farm"
-        if self.farm_ipc is None:  # Stop must work without a prior Connect
-            try:
-                self.farm_ipc = IpcClient()
-            except (IpcError, OSError, ValueError):
-                self.farm_ipc = None
         if self.farm_ipc is not None:
             try:
                 self.farm_ipc.call("control", "Stop")
+                self.status_message = "Gem Farm Stopped"
             except IpcError:
-                pass
+                self.status_message = "Gem Farm not running"
             self.farm_ipc.close()
             self.farm_ipc = None
-        pid = self._farm_pid()
-        if pid is None:
-            self.status_message = "Gem Farm not running"
-            return
-        # The stop flag is only honoured between farm loop iterations; a
-        # farm stuck inside a recovery loop never reads it. Escalate.
-        if not self._wait_farm_exit(pid, 3.0):
-            self._win.terminate_process(pid)
-            self._wait_farm_exit(pid, 2.0)
-        if self.farm_process is not None \
-                and self.farm_process.poll() is not None:
-            self.farm_process = None
-        if self._farm_pid() is None:
-            # A killed farm never unlinks its endpoint file; clean it up so
-            # the next Connect/Run does not chase a dead endpoint.
-            try:
-                os.unlink(endpoint_file_path())
-            except OSError:
-                pass
-            self.status_message = "Gem Farm Stopped"
-        else:
-            self.status_message = f"Gem Farm still alive (PID {pid})"
-
-    def _farm_pid(self):
-        """PID of the running farm: our child if we started it, else the one
-        recorded in the IPC endpoint file (verified against a live python
-        process - the file can be stale after a hard kill)."""
-        proc = self.farm_process
-        if proc is not None and proc.poll() is None:
-            return proc.pid
-        try:
-            with open(endpoint_file_path(), encoding="utf-8") as f:
-                pid = json.load(f).get("pid")
-        except (OSError, ValueError):
-            return None
-        if not pid:
-            return None
-        name = (self._win.get_process_name(pid) or "").lower()
-        return pid if name.startswith("python") else None
-
-    def _wait_farm_exit(self, pid, timeout_s):
-        proc = self.farm_process \
-            if self.farm_process is not None and self.farm_process.pid == pid \
-            else None
-        deadline = time.time() + timeout_s
-        while time.time() < deadline:
-            if proc is not None:
-                if proc.poll() is not None:
-                    return True
-            elif not (self._win.get_process_name(pid) or "").lower() \
-                    .startswith("python"):
-                return True
-            time.sleep(0.2)
-        return False
 
     def _on_connected(self):
         exe = self.ctx.setting("IBM_Game_Exe", "IdleDragons.exe")
@@ -344,14 +254,8 @@ class HomeHub:
         return snapshot
 
     def IsGameOpen(self):
-        exe = self.ctx.setting("IBM_Game_Exe", "IdleDragons.exe")
-        if self._win.find_window_by_exe(exe):
-            return True
-        # Isolated-display mode (BRIVMASTER_DISPLAY): the game window lives
-        # on another X display the Home GUI cannot see - check the process
-        if os.environ.get("BRIVMASTER_DISPLAY"):
-            return bool(self._win.find_pids(exe))
-        return False
+        return bool(self._win.find_window_by_exe(
+            self.ctx.setting("IBM_Game_Exe", "IdleDragons.exe")))
 
     def RefreshChestCounts(self):
         memory = self.ctx.memory
